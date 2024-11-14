@@ -7,21 +7,65 @@ from sklearn.decomposition import PCA
 import seaborn as sns
 from sklearn.metrics import silhouette_score
 from datetime import datetime
+import time
+from contextlib import contextmanager
+
+class Timer:
+    """计时器类，用于记录和管理各个步骤的时间"""
+    def __init__(self):
+        self.times = {}
+        self.start_times = {}
+
+    @contextmanager
+    def timer(self, name):
+        """上下文管理器，用于计时代码块的执行时间"""
+        try:
+            self.start_times[name] = time.time()
+            yield
+        finally:
+            end_time = time.time()
+            duration = end_time - self.start_times[name]
+            if name in self.times:
+                if isinstance(self.times[name], list):
+                    self.times[name].append(duration)
+                else:
+                    self.times[name] = [self.times[name], duration]
+            else:
+                self.times[name] = duration
+
+    def get_report(self):
+        """生成计时报告"""
+        report = "\nTiming Report:\n" + "="*50 + "\n"
+        for name, duration in self.times.items():
+            if isinstance(duration, list):
+                avg_time = np.mean(duration)
+                total_time = np.sum(duration)
+                report += f"{name}:\n"
+                report += f"  Average time: {avg_time:.3f}s\n"
+                report += f"  Total time: {total_time:.3f}s\n"
+                report += f"  Iterations: {len(duration)}\n"
+            else:
+                report += f"{name}: {duration:.3f}s\n"
+        return report
+
+# 创建全局计时器实例
+timer = Timer()
 
 def load_mnist(n_samples=5000):
     """Load and preprocess MNIST dataset"""
-    print("Loading MNIST dataset...")
-    X, y = fetch_openml('mnist_784', version=1, return_X_y=True, as_frame=False)
-    
-    # 随机选择n_samples个样本
-    idx = np.random.choice(X.shape[0], n_samples, replace=False)
-    X = X[idx]
-    y = y[idx]
-    
-    # 标准化数据
-    scaler = StandardScaler()
-    X = scaler.fit_transform(X)
-    
+    with timer.timer("Data Loading"):
+        print("Loading MNIST dataset...")
+        X, y = fetch_openml('mnist_784', version=1, return_X_y=True, as_frame=False)
+        
+        # 随机选择n_samples个样本
+        idx = np.random.choice(X.shape[0], n_samples, replace=False)
+        X = X[idx]
+        y = y[idx]
+        
+        # 标准化数据
+        scaler = StandardScaler()
+        X = scaler.fit_transform(X)
+        
     return X, y
 
 class KMeans:
@@ -36,48 +80,48 @@ class KMeans:
         
     def initialize_centroids(self, X):
         """随机初始化质心"""
-        n_samples, n_features = X.shape
-        idx = np.random.choice(n_samples, self.n_clusters, replace=False)
-        self.centroids = X[idx]
+        with timer.timer("Centroid Initialization"):
+            n_samples, n_features = X.shape
+            idx = np.random.choice(n_samples, self.n_clusters, replace=False)
+            self.centroids = X[idx]
         
     def get_distance(self, X):
         """计算每个样本到所有质心的距离"""
-        distances = np.zeros((X.shape[0], self.n_clusters))
-        for k in range(self.n_clusters):
-            distances[:, k] = np.sum((X - self.centroids[k]) ** 2, axis=1)
+        with timer.timer("Distance Calculation"):
+            distances = np.zeros((X.shape[0], self.n_clusters))
+            for k in range(self.n_clusters):
+                distances[:, k] = np.sum((X - self.centroids[k]) ** 2, axis=1)
         return distances
     
     def fit(self, X):
         """训练K-means模型"""
-        self.initialize_centroids(X)
-        
-        for i in tqdm(range(self.max_iters), desc="Training K-means"):
-            start_time = datetime.now()
+        with timer.timer("K-means Training"):
+            self.initialize_centroids(X)
             
-            # 计算距离并分配簇
-            distances = self.get_distance(X)
-            self.labels_ = np.argmin(distances, axis=1)
-            
-            # 计算inertia
-            current_inertia = np.sum(np.min(distances, axis=1))
-            self.inertia_history_.append(current_inertia)
-            
-            # 更新质心
-            new_centroids = np.array([X[self.labels_ == k].mean(axis=0) 
-                                    for k in range(self.n_clusters)])
-            
-            # 记录迭代时间
-            iteration_time = (datetime.now() - start_time).total_seconds()
-            self.iteration_times_.append(iteration_time)
-            
-            # 检查收敛
-            if np.all(self.centroids == new_centroids):
-                break
-                
-            self.centroids = new_centroids
-            self.n_iters_ = i + 1
+            for i in tqdm(range(self.max_iters), desc="Training K-means"):
+                with timer.timer("Single Iteration"):
+                    # 计算距离并分配簇
+                    distances = self.get_distance(X)
+                    self.labels_ = np.argmin(distances, axis=1)
+                    
+                    # 计算inertia
+                    current_inertia = np.sum(np.min(distances, axis=1))
+                    self.inertia_history_.append(current_inertia)
+                    
+                    # 更新质心
+                    with timer.timer("Centroid Update"):
+                        new_centroids = np.array([X[self.labels_ == k].mean(axis=0) 
+                                                for k in range(self.n_clusters)])
+                    
+                    # 检查收敛
+                    if np.all(self.centroids == new_centroids):
+                        break
+                        
+                    self.centroids = new_centroids
+                    self.n_iters_ = i + 1
             
         return self.labels_
+
 
 def visualize_centroids(centroids, cluster_sizes, cluster_purities):
     """可视化质心（增强版）"""
@@ -96,7 +140,7 @@ def visualize_centroids(centroids, cluster_sizes, cluster_purities):
              "Purity indicates the percentage of the most common digit in each cluster",
              ha='center', fontsize=10, style='italic')
     plt.tight_layout()
-    plt.show()
+    plt.savefig('cluster_centers.png', dpi=300, bbox_inches='tight')
 
 def plot_loss_curve(inertia_history, iteration_times):
     """绘制增强版损失曲线"""
@@ -128,7 +172,7 @@ def plot_loss_curve(inertia_history, iteration_times):
              transform=ax2.transAxes, verticalalignment='top')
     
     plt.tight_layout()
-    plt.show()
+    plt.savefig('loss_curve.png', dpi=300)
 
 def plot_cluster_distribution(labels, y, cluster_sizes):
     """绘制增强版聚类分布热力图"""
@@ -163,7 +207,7 @@ def plot_cluster_distribution(labels, y, cluster_sizes):
                 ha='right', fontsize=10, style='italic')
     
     plt.tight_layout()
-    plt.show()
+    plt.savefig('cluster_distribution.png')
 
 def visualize_pca_clusters(X, labels, y, silhouette_avg):
     """使用PCA进行增强版聚类可视化"""
@@ -194,7 +238,7 @@ def visualize_pca_clusters(X, labels, y, silhouette_avg):
                 ha='center', fontsize=10, style='italic')
     
     plt.tight_layout()
-    plt.show()
+    plt.savefig('pca_clusters.png', dpi=300)
 
 def plot_sample_images(X, labels, y, n_samples_per_cluster=5):
     """绘制增强版样本图像展示"""
@@ -225,59 +269,72 @@ def plot_sample_images(X, labels, y, n_samples_per_cluster=5):
     plt.suptitle('Sample Images from Each Cluster\nwith True Labels and Cluster Statistics', 
                  fontsize=14, y=1.01)
     plt.tight_layout()
-    plt.show()
+    plt.savefig('sample_images.png', dpi=300)
 
 def main():
-    # 加载数据
-    X, y = load_mnist(n_samples=5000)
-    
-    # 训练模型
-    kmeans = KMeans(n_clusters=10, max_iters=100)
-    labels = kmeans.fit(X)
-    
-    # 计算评估指标
-    silhouette_avg = silhouette_score(X, labels)
-    cluster_sizes = [np.sum(labels == i) for i in range(10)]
-    
-    # 计算每个簇的纯度
-    cluster_purities = []
-    for k in range(10):
-        cluster_labels = y[labels == k]
-        unique, counts = np.unique(cluster_labels, return_counts=True)
-        purity = (np.max(counts) / len(cluster_labels)) * 100
-        cluster_purities.append(purity)
-    
-    # 可视化结果
-    print("\n1. Visualizing learned cluster centers with statistics...")
-    visualize_centroids(kmeans.centroids, cluster_sizes, cluster_purities)
-    
-    print("\n2. Plotting convergence curve and iteration times...")
-    plot_loss_curve(kmeans.inertia_history_, kmeans.iteration_times_)
-    
-    print("\n3. Visualizing cluster distribution with cluster sizes...")
-    plot_cluster_distribution(labels, y, cluster_sizes)
-    
-    print("\n4. Visualizing clusters in 2D using PCA with silhouette score...")
-    visualize_pca_clusters(X, labels, y, silhouette_avg)
-    
-    print("\n5. Showing sample images from each cluster with true labels...")
-    plot_sample_images(X, labels, y)
-    
-    # 打印详细的聚类评估报告
-    print("\nClustering Evaluation Report:")
-    print(f"Number of iterations to converge: {kmeans.n_iters_}")
-    print(f"Average iteration time: {np.mean(kmeans.iteration_times_):.3f} seconds")
-    print(f"Silhouette Score: {silhouette_avg:.3f}")
-    print("\nCluster Statistics:")
-    
-    for k in range(10):
-        cluster_labels = y[labels == k]
-        print(f"\nCluster {k}:")
-        print(f"Size: {len(cluster_labels)} samples ({len(cluster_labels)/len(y)*100:.1f}% of total)")
-        print(f"Purity: {cluster_purities[k]:.1f}%")
-        unique, counts = np.unique(cluster_labels, return_counts=True)
-        for label, count in zip(unique, counts):
-            print(f"  Digit {label}: {count} ({count/len(cluster_labels)*100:.1f}%)")
+    with timer.timer("Total Execution"):
+        # 加载数据
+        X, y = load_mnist(n_samples=5000)
+        
+        # 训练模型
+        kmeans = KMeans(n_clusters=10, max_iters=100)
+        
+        with timer.timer("Model Training"):
+            labels = kmeans.fit(X)
+        
+        # 计算评估指标
+        with timer.timer("Metrics Calculation"):
+            silhouette_avg = silhouette_score(X, labels)
+            cluster_sizes = [np.sum(labels == i) for i in range(10)]
+            
+            # 计算每个簇的纯度
+            cluster_purities = []
+            for k in range(10):
+                cluster_labels = y[labels == k]
+                unique, counts = np.unique(cluster_labels, return_counts=True)
+                purity = (np.max(counts) / len(cluster_labels)) * 100
+                cluster_purities.append(purity)
+        
+        # 可视化结果
+        with timer.timer("Visualization"):
+            print("\n1. Visualizing learned cluster centers with statistics...")
+            with timer.timer("Centroids Visualization"):
+                visualize_centroids(kmeans.centroids, cluster_sizes, cluster_purities)
+            
+            print("\n2. Plotting convergence curve and iteration times...")
+            with timer.timer("Loss Curve Visualization"):
+                plot_loss_curve(kmeans.inertia_history_, kmeans.iteration_times_)
+            
+            print("\n3. Visualizing cluster distribution with cluster sizes...")
+            with timer.timer("Distribution Visualization"):
+                plot_cluster_distribution(labels, y, cluster_sizes)
+            
+            print("\n4. Visualizing clusters in 2D using PCA with silhouette score...")
+            with timer.timer("PCA Visualization"):
+                visualize_pca_clusters(X, labels, y, silhouette_avg)
+            
+            print("\n5. Showing sample images from each cluster with true labels...")
+            with timer.timer("Sample Images Visualization"):
+                plot_sample_images(X, labels, y)
+        
+        # 打印详细的聚类评估报告
+        with timer.timer("Results Report"):
+            print("\nClustering Evaluation Report:")
+            print(f"Number of iterations to converge: {kmeans.n_iters_}")
+            print(f"Silhouette Score: {silhouette_avg:.3f}")
+            print("\nCluster Statistics:")
+            
+            for k in range(10):
+                cluster_labels = y[labels == k]
+                print(f"\nCluster {k}:")
+                print(f"Size: {len(cluster_labels)} samples ({len(cluster_labels)/len(y)*100:.1f}% of total)")
+                print(f"Purity: {cluster_purities[k]:.1f}%")
+                unique, counts = np.unique(cluster_labels, return_counts=True)
+                for label, count in zip(unique, counts):
+                    print(f"  Digit {label}: {count} ({count/len(cluster_labels)*100:.1f}%)")
+        
+        # 打印时间报告
+        print(timer.get_report())
 
 if __name__ == "__main__":
     main()
