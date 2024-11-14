@@ -11,19 +11,19 @@ import time
 from contextlib import contextmanager
 
 class Timer:
-    """计时器类，用于记录和管理各个步骤的时间"""
+    """计时器类，用于记录和管理各个步骤的时间（毫秒）"""
     def __init__(self):
         self.times = {}
         self.start_times = {}
 
     @contextmanager
     def timer(self, name):
-        """上下文管理器，用于计时代码块的执行时间"""
+        """上下文管理器，用于计时代码块的执行时间（毫秒）"""
         try:
-            self.start_times[name] = time.time()
+            self.start_times[name] = time.time() * 1000  # 转换为毫秒
             yield
         finally:
-            end_time = time.time()
+            end_time = time.time() * 1000  # 转换为毫秒
             duration = end_time - self.start_times[name]
             if name in self.times:
                 if isinstance(self.times[name], list):
@@ -34,18 +34,18 @@ class Timer:
                 self.times[name] = duration
 
     def get_report(self):
-        """生成计时报告"""
-        report = "\nTiming Report:\n" + "="*50 + "\n"
+        """生成计时报告（毫秒）"""
+        report = "\nTiming Report (ms):\n" + "="*50 + "\n"
         for name, duration in self.times.items():
             if isinstance(duration, list):
                 avg_time = np.mean(duration)
                 total_time = np.sum(duration)
                 report += f"{name}:\n"
-                report += f"  Average time: {avg_time:.3f}s\n"
-                report += f"  Total time: {total_time:.3f}s\n"
+                report += f"  Average time: {avg_time:.5f}ms\n"
+                report += f"  Total time: {total_time:.5f}ms\n"
                 report += f"  Iterations: {len(duration)}\n"
             else:
-                report += f"{name}: {duration:.3f}s\n"
+                report += f"{name}: {duration:.5f}ms\n"
         return report
 
 # 创建全局计时器实例
