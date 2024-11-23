@@ -115,8 +115,19 @@ class KMeans:
                         new_centroids_gpu = CUDAKMeans.update_centroids(X, self.labels_, self.n_clusters)
                     
                     with timer.timer("Centroid Update (CPU)"):
-                        new_centroids_cpu = np.array([X[self.labels_ == k].mean(axis=0) for k in range(self.n_clusters)])
-                    
+                        new_centroids_cpu = np.zeros((self.n_clusters, X.shape[1]))
+                        for k in range(self.n_clusters):
+                            sum_vector = np.zeros(X.shape[1])
+                            count = 0
+                            for i in range(X.shape[0]):
+                                if self.labels_[i] == k:
+                                    sum_vector += X[i]
+                                    count += 1
+                            if count > 0:
+                                new_centroids_cpu[k] = sum_vector / count
+                            else:
+                                # 处理没有分配到任何点的簇
+                                new_centroids_cpu[k] = X[np.random.choice(X.shape[0])]                    
                     # 可选：比较GPU和CPU的质心是否一致
                     if not np.allclose(new_centroids_gpu, new_centroids_cpu, atol=1e-5):
                         print("Warning: Centroids from GPU and CPU do not match at iteration", i)
