@@ -9,6 +9,8 @@ from sklearn.metrics import silhouette_score
 from datetime import datetime
 import time
 from contextlib import contextmanager
+from kmeans_cuda import CUDAKMeans
+
 
 class Timer:
     """计时器类，用于记录和管理各个步骤的时间（毫秒）"""
@@ -109,9 +111,17 @@ class KMeans:
                     self.inertia_history_.append(current_inertia)
                     
                     # 更新质心
-                    with timer.timer("Centroid Update"):
-                        new_centroids = np.array([X[self.labels_ == k].mean(axis=0) 
-                                                for k in range(self.n_clusters)])
+                    with timer.timer("Centroid Update (CUDA)"):
+                        new_centroids_gpu = CUDAKMeans.update_centroids(X, self.labels_, self.n_clusters)
+                    
+                    with timer.timer("Centroid Update (CPU)"):
+                        new_centroids_cpu = np.array([X[self.labels_ == k].mean(axis=0) for k in range(self.n_clusters)])
+                    
+                    # 可选：比较GPU和CPU的质心是否一致
+                    if not np.allclose(new_centroids_gpu, new_centroids_cpu, atol=1e-5):
+                        print("Warning: Centroids from GPU and CPU do not match at iteration", i)
+                    
+                    new_centroids = new_centroids_gpu if new_centroids_gpu is not None else new_centroids_cpu
                     
                     # 检查收敛
                     if np.all(self.centroids == new_centroids):
@@ -296,42 +306,40 @@ def main():
                 cluster_purities.append(purity)
         
         # 可视化结果
-        with timer.timer("Visualization"):
-            print("\n1. Visualizing learned cluster centers with statistics...")
-            with timer.timer("Centroids Visualization"):
-                visualize_centroids(kmeans.centroids, cluster_sizes, cluster_purities)
-            
-            print("\n2. Plotting convergence curve and iteration times...")
-            with timer.timer("Loss Curve Visualization"):
-                plot_loss_curve(kmeans.inertia_history_, kmeans.iteration_times_)
-            
-            print("\n3. Visualizing cluster distribution with cluster sizes...")
-            with timer.timer("Distribution Visualization"):
-                plot_cluster_distribution(labels, y, cluster_sizes)
-            
-            print("\n4. Visualizing clusters in 2D using PCA with silhouette score...")
-            with timer.timer("PCA Visualization"):
-                visualize_pca_clusters(X, labels, y, silhouette_avg)
-            
-            print("\n5. Showing sample images from each cluster with true labels...")
-            with timer.timer("Sample Images Visualization"):
-                plot_sample_images(X, labels, y)
+        print("\n1. Visualizing learned cluster centers with statistics...")
+        with timer.timer("Centroids Visualization"):
+            visualize_centroids(kmeans.centroids, cluster_sizes, cluster_purities)
+        
+        print("\n2. Plotting convergence curve and iteration times...")
+        with timer.timer("Loss Curve Visualization"):
+            plot_loss_curve(kmeans.inertia_history_, kmeans.iteration_times_)
+        
+        print("\n3. Visualizing cluster distribution with cluster sizes...")
+        with timer.timer("Distribution Visualization"):
+            plot_cluster_distribution(labels, y, cluster_sizes)
+        
+        print("\n4. Visualizing clusters in 2D using PCA with silhouette score...")
+        with timer.timer("PCA Visualization"):
+            visualize_pca_clusters(X, labels, y, silhouette_avg)
+        
+        print("\n5. Showing sample images from each cluster with true labels...")
+        with timer.timer("Sample Images Visualization"):
+            plot_sample_images(X, labels, y)
         
         # 打印详细的聚类评估报告
-        with timer.timer("Results Report"):
-            print("\nClustering Evaluation Report:")
-            print(f"Number of iterations to converge: {kmeans.n_iters_}")
-            print(f"Silhouette Score: {silhouette_avg:.3f}")
-            print("\nCluster Statistics:")
-            
-            for k in range(10):
-                cluster_labels = y[labels == k]
-                print(f"\nCluster {k}:")
-                print(f"Size: {len(cluster_labels)} samples ({len(cluster_labels)/len(y)*100:.1f}% of total)")
-                print(f"Purity: {cluster_purities[k]:.1f}%")
-                unique, counts = np.unique(cluster_labels, return_counts=True)
-                for label, count in zip(unique, counts):
-                    print(f"  Digit {label}: {count} ({count/len(cluster_labels)*100:.1f}%)")
+        print("\nClustering Evaluation Report:")
+        print(f"Number of iterations to converge: {kmeans.n_iters_}")
+        print(f"Silhouette Score: {silhouette_avg:.3f}")
+        print("\nCluster Statistics:")
+        
+        for k in range(10):
+            cluster_labels = y[labels == k]
+            print(f"\nCluster {k}:")
+            print(f"Size: {len(cluster_labels)} samples ({len(cluster_labels)/len(y)*100:.1f}% of total)")
+            print(f"Purity: {cluster_purities[k]:.1f}%")
+            unique, counts = np.unique(cluster_labels, return_counts=True)
+            for label, count in zip(unique, counts):
+                print(f"  Digit {label}: {count} ({count/len(cluster_labels)*100:.1f}%)")
         
         # 打印时间报告
         print(timer.get_report())
